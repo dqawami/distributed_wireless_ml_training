@@ -6,8 +6,7 @@ def parse_args():
 
     parser.add_argument('ip_address', 
     help='IP address of server', 
-    type=str, 
-    required=True)
+    type=str)
 
     args = parser.parse_args()
 
@@ -25,7 +24,7 @@ def main():
 
     client.close()
 
-    print("from_server")
+    print(from_server.decode())
 
 if __name__ == '__main__':
     main()
