@@ -18,13 +18,14 @@ def main():
     client = socket.socket()
     client.connect((args.ip_address, 8080))
 
-    client.send("I am CLIENT\n".encode())
+    # client.send("I am CLIENT\n".encode())
+    client.send(str(3.444).encode())
 
     from_server = client.recv(4096)
 
     client.close()
 
-    print(from_server.decode())
+    print(float(from_server.decode()))
 
 if __name__ == '__main__':
     main()

@@ -30,8 +30,9 @@ def main():
         data = conn.recv(4096)
         if not data: break
         from_client += data.decode()
-        print(from_client)
-        conn.send("I am SERVER\n".encode())
+        print(float(from_client))
+        # conn.send("I am SERVER\n".encode())
+        conn.send(str(4.454).encode())
         
     conn.close()
     print('client disconnected')
