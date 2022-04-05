@@ -1,5 +1,4 @@
 import argparse
-import socket
 
 import torch
 import torchvision
@@ -9,6 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import torch.optim as optim
+
+from wireless_trainer import WirelessTrainer
 
 
 class Net(nn.Module):
@@ -97,8 +98,6 @@ def parse_args():
 def main():
     args = parse_args()
 
-    assert args.inet_type == 'client' or args.inet_type == 'server'
-
     transform = transforms.Compose(
         [transforms.ToTensor(), 
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
@@ -112,33 +111,14 @@ def main():
                                            download=args.save_data, 
                                            transform=transform)
 
-    net_node = socket.socket()
-    net_details = (args.ip_address, args.socket)
+    wireless_trainer = WirelessTrainer(args.inet_type, args.ip_address, 
+                                       args.socket, args.buffer, args.epochs, 
+                                       args.batch_size, nn.CrossEntropyLoss())
 
-    if args.inet_type == 'server':
-        net_node.bind(net_details)
-        net_node.listen(5)
-        temp, _ = net_node.accept()
-        net_node.close()
-        net_node = temp
-    else:
-        net_node.connect(net_details)
+    print("Total batch", wireless_trainer.total_batch) 
 
-    net_node.send(str(args.epochs).encode())
-    other_epochs = int(net_node.recv(args.buffer).decode())
-    assert args.epochs == other_epochs
-
-    net_node.send(str(args.batch_size).encode())
-    other_batch_size = int(net_node.recv(args.buffer).decode())
-
-    total_batch = args.batch_size + other_batch_size
-
-    print("Total batch", total_batch) 
-
-    subset = (len(trainset) * args.batch_size) // total_batch
-    trainset, _ = torch.utils.data.random_split(trainset, 
-                                                [subset, 
-                                                 len(trainset) - subset])
+    trainset = wireless_trainer.get_data_subset(trainset, 
+                                                torch.utils.data.random_split)
 
     trainloader = torch.utils.data.DataLoader(trainset, 
                                               batch_size=args.batch_size, 
@@ -152,7 +132,6 @@ def main():
 
     net = Net()
 
-    criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum)
     
     for epoch in range(args.epochs):
@@ -166,9 +145,7 @@ def main():
 
             # forward + backward + optimize
             outputs = net(inputs)
-            loss = criterion(outputs, labels)
-            net_node.send(str(loss.item()).encode())
-            loss += float(net_node.recv(args.buffer).decode())
+            loss = wireless_trainer.criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 
