@@ -42,7 +42,6 @@ class WirelessTrainer:
 
     def criterion(self, outputs, labels):
         loss = self._criterion(outputs, labels)
-        self.send(loss)
-        loss += self.recv(float)
+        loss += self.send_and_recv(loss.item())
 
         return loss
