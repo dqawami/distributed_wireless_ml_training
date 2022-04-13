@@ -145,6 +145,9 @@ def main():
 
         trainset = wireless_trainer.get_data_subset(trainset, 
                                                     torch.utils.data.random_split)
+        criterion = wireless_trainer.criterion
+
+    print(criterion)
 
     trainloader = torch.utils.data.DataLoader(trainset, 
                                               batch_size=args.batch_size, 
@@ -205,10 +208,7 @@ def main():
 
             # forward + backward + optimize
             outputs = net(inputs.to(device))
-            if args.wireless:
-                loss = wireless_trainer.criterion(outputs, labels)
-            else:
-                loss = criterion(outputs, labels)
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 

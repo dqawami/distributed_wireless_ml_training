@@ -7,7 +7,7 @@ class WirelessTrainer:
 
         self.buffer = buffer
         self.batch_size = batch_size
-        self.criterion = criterion
+        self._criterion = criterion
 
         self.net_node = socket.socket()
         net_details = (ip_address, sock)
@@ -41,7 +41,10 @@ class WirelessTrainer:
         return trainset
 
     def criterion(self, outputs, labels):
-        loss = self.criterion(outputs, labels)
+        loss = self._criterion(outputs, labels)
         loss += self.send_and_recv(loss)
+
+        print("Returning loss")
+        print(loss)
 
         return loss
