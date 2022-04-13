@@ -7,9 +7,10 @@ import torchvision.transforms as transforms
 
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.backends.cudnn as cudnn
 
 import torch.optim as optim
+
+import matplotlib.pyplot as plt
 
 from wireless_trainer import WirelessTrainer
 
@@ -31,6 +32,11 @@ def parse_args():
     parser.add_argument('--save_data', 
     help='Whether to save data', 
     action='store_true')
+
+    parser.add_argument('--resume', 
+    help='Resumes from a checkpoint', 
+    type=str, 
+    default=None)
 
     parser.add_argument('--cuda', 
     help='Enables CUDA (if available',
@@ -100,6 +106,11 @@ def parse_args():
     type=str,
     default=None)
 
+    parser.add_argument('--plot_name', 
+    help='Name of the accuracy plot (saved in the checkpoint_dir)', 
+    type=str, 
+    default='plot.png')
+
     args = parser.parse_args()
 
     return args
@@ -157,16 +168,33 @@ def main():
     folders = checkpoint_dir.split('/')
 
     temp = folders.pop(0) + '/'
+    folders.append('')
     for f in folders:
         if not os.path.isdir(temp):
             os.mkdir(temp)
         temp += f + '/'
 
-    if args.cuda and torch.cuda.is_available():
-        net = torch.nn.DataParallel(net)
-        cudnn.benchmark = True
+    plot_name = checkpoint_dir + '/' + args.plot_name
 
-    for epoch in range(args.epochs):
+    start_epoch = 0
+    epochs = []
+    accs = []
+
+    if args.resume is not None:
+        assert os.path.exists(args.resume), 'Error: checkpoint file not found'
+        checkpoint = torch.load(args.resume)
+        net.load_state_dict(checkpoint['net'])
+        start_epoch = checkpoint['epoch']
+        epochs.append(checkpoint['epoch'])
+        accs.append(checkpoint['acc'])
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(args.epochs - start_epoch))
+
+    device = torch.device('cuda:0' if torch.cuda.is_available() and args.cuda else 'cpu')
+
+    net.to(device)
+
+    for epoch in range(start_epoch, args.epochs):
         running_loss = 0.0
         for i, data in enumerate(trainloader, 0):
             # get the inputs; data is a list of [inputs, labels]
@@ -176,7 +204,7 @@ def main():
             optimizer.zero_grad()
 
             # forward + backward + optimize
-            outputs = net(inputs)
+            outputs = net(inputs.to(device))
             if args.wireless:
                 loss = wireless_trainer.criterion(outputs, labels)
             else:
@@ -197,7 +225,7 @@ def main():
             for data in testloader:
                 images, labels = data
                 # calculate outputs by running images through the network
-                outputs = net(images)
+                outputs = net(images.to(device))
                 # the class with the highest energy is what we choose as prediction
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
@@ -206,12 +234,21 @@ def main():
         acc = 100 * correct // total
         print(f'Accuracy of the network at Epoch {epoch + 1}: {acc} %')
 
+        epochs.append(epoch + 1)
+        accs.append(acc)
+
+        plt.clf()
+        plt.plot(epochs, accs)
+        plt.savefig(plot_name)
+
         state = {
             'net': net.state_dict(),
             'acc': acc,
             'epoch': epoch + 1,
         }
         torch.save(state, checkpoint_dir + '/epoch_' + str(epoch + 1) + '.pth')
+
+        scheduler.step()
 
     print('Finished Training')
    
