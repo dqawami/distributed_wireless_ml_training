@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import torch
 import torchvision
@@ -6,50 +7,21 @@ import torchvision.transforms as transforms
 
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.backends.cudnn as cudnn
 
 import torch.optim as optim
 
 from wireless_trainer import WirelessTrainer
 
-
-class Net(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
-
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = torch.flatten(x, 1) # flatten all dimensions except batch
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+from model_wrapper import get_model
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Parameters for ML training')
 
-    parser.add_argument('inet_type', 
-    help='Either client or server', 
+    parser.add_argument('model', 
+    help='Model type', 
     type=str)
-
-    parser.add_argument('ip_address', 
-    help='IP address of server', 
-    type=str)
-
-    parser.add_argument('socket', 
-    help='Socket number', 
-    type=int)
-
-    parser.add_argument('batch_size', 
-    help='Batch size for this node', 
-    type=int)
 
     parser.add_argument('--data_dir', 
     help='Data directory', 
@@ -60,10 +32,9 @@ def parse_args():
     help='Whether to save data', 
     action='store_true')
 
-    parser.add_argument('--buffer', 
-    help='Size of buffer', 
-    type=int, 
-    default=4096)
+    parser.add_argument('--cuda', 
+    help='Enables CUDA (if available',
+    action='store_true')
 
     parser.add_argument('--train_workers', 
     help='Number of workers for training loader', 
@@ -85,10 +56,49 @@ def parse_args():
     type=float, 
     default=0.9)
 
+    parser.add_argument('--batch_size', 
+    help='Batch size for this node', 
+    type=int, 
+    default=10)
+
+    parser.add_argument('--mini_batch', 
+    help='Mini-batch to report loss', 
+    type=int, 
+    default=2000)
+
     parser.add_argument('--epochs', 
     help='Number of epochs for the model', 
     type=int, 
-    default=16)
+    default=200)
+
+    parser.add_argument('--wireless', 
+    help='Whether or not training is wireless', 
+    action='store_true')
+
+    parser.add_argument('--inet_type', 
+    help='Either client or server', 
+    type=str, 
+    default=None)
+
+    parser.add_argument('--ip_address', 
+    help='IP address of server', 
+    type=str, 
+    default=None)
+
+    parser.add_argument('--socket', 
+    help='Socket number', 
+    type=int, 
+    default=-1)
+
+    parser.add_argument('--buffer', 
+    help='Size of buffer', 
+    type=int, 
+    default=4096)
+
+    parser.add_argument('--checkpoint_dir',
+    help='Directory to save model checkpoints',
+    type=str,
+    default=None)
 
     args = parser.parse_args()
 
@@ -111,14 +121,19 @@ def main():
                                            download=args.save_data, 
                                            transform=transform)
 
-    wireless_trainer = WirelessTrainer(args.inet_type, args.ip_address, 
-                                       args.socket, args.buffer, args.epochs, 
-                                       args.batch_size, nn.CrossEntropyLoss())
+    criterion = nn.CrossEntropyLoss()
 
-    print("Total batch", wireless_trainer.total_batch) 
+    if args.wireless:
+        assert (args.inet_type is not None and args.ip_address is not None
+                and args.socket > 0 and args.buffer > 0)
+        wireless_trainer = WirelessTrainer(args.inet_type, args.ip_address, 
+                                        args.socket, args.buffer, args.epochs, 
+                                        args.batch_size, criterion)
 
-    trainset = wireless_trainer.get_data_subset(trainset, 
-                                                torch.utils.data.random_split)
+        print("Total batch", wireless_trainer.total_batch) 
+
+        trainset = wireless_trainer.get_data_subset(trainset, 
+                                                    torch.utils.data.random_split)
 
     trainloader = torch.utils.data.DataLoader(trainset, 
                                               batch_size=args.batch_size, 
@@ -130,10 +145,27 @@ def main():
                                              shuffle=False, 
                                              num_workers=args.test_workers)
 
-    net = Net()
+    net = get_model(args.model)
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum)
-    
+
+    if args.checkpoint_dir is None:
+        checkpoint_dir = './checkpoints/' + args.model
+    else:
+        checkpoint_dir = args.checkpoint_dir
+
+    folders = checkpoint_dir.split('/')
+
+    temp = folders.pop(0) + '/'
+    for f in folders:
+        if not os.path.isdir(temp):
+            os.mkdir(temp)
+        temp += f + '/'
+
+    if args.cuda and torch.cuda.is_available():
+        net = torch.nn.DataParallel(net)
+        cudnn.benchmark = True
+
     for epoch in range(args.epochs):
         running_loss = 0.0
         for i, data in enumerate(trainloader, 0):
@@ -145,32 +177,43 @@ def main():
 
             # forward + backward + optimize
             outputs = net(inputs)
-            loss = wireless_trainer.criterion(outputs, labels)
+            if args.wireless:
+                loss = wireless_trainer.criterion(outputs, labels)
+            else:
+                loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 
             # print statistics
             running_loss += loss.item()
-            if i % 2000 == 1999:    # print every 2000 mini-batches
-                print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
+            if i % args.mini_batch == (args.mini_batch - 1):
+                print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / args.mini_batch:.3f}')
                 running_loss = 0.0
 
+        correct = 0
+        total = 0
+        # since we're not training, we don't need to calculate the gradients for our outputs
+        with torch.no_grad():
+            for data in testloader:
+                images, labels = data
+                # calculate outputs by running images through the network
+                outputs = net(images)
+                # the class with the highest energy is what we choose as prediction
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        acc = 100 * correct // total
+        print(f'Accuracy of the network at Epoch {epoch + 1}: {acc} %')
+
+        state = {
+            'net': net.state_dict(),
+            'acc': acc,
+            'epoch': epoch + 1,
+        }
+        torch.save(state, checkpoint_dir + '/epoch_' + str(epoch + 1) + '.pth')
+
     print('Finished Training')
-
-    correct = 0
-    total = 0
-    # since we're not training, we don't need to calculate the gradients for our outputs
-    with torch.no_grad():
-        for data in testloader:
-            images, labels = data
-            # calculate outputs by running images through the network
-            outputs = net(images)
-            # the class with the highest energy is what we choose as prediction
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    print(f'Accuracy of the network on the 10000 test images: {100 * correct // total} %')
    
 
 if __name__ == '__main__':
