@@ -147,8 +147,6 @@ def main():
                                                     torch.utils.data.random_split)
         criterion = wireless_trainer.criterion
 
-    print(criterion)
-
     trainloader = torch.utils.data.DataLoader(trainset, 
                                               batch_size=args.batch_size, 
                                               shuffle=True, 
