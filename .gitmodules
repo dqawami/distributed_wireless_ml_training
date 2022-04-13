@@ -1,0 +1,3 @@
+[submodule "pytorch-cifar"]
+	path = pytorch-cifar
+	url = git@github.com:dqawami/pytorch-cifar.git
