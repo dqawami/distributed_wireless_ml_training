@@ -23,7 +23,9 @@ class WirelessTrainer:
 
         assert epochs == self.send_and_recv(epochs)
 
-        self.total_batch = batch_size + self.send_and_recv(batch_size)
+        self.other_batch = self.send_and_recv(batch_size)
+
+        self.total_batch = batch_size + self.other_batch
 
     def send(self, data):
         self.net_node.send(str(data).encode())
@@ -42,6 +44,9 @@ class WirelessTrainer:
 
     def criterion(self, outputs, labels):
         loss = self._criterion(outputs, labels)
-        loss += self.send_and_recv(loss.item())
+        other_loss = self.send_and_recv(loss.item())
 
-        return loss
+        total_loss = (loss * self.batch_size + 
+                      other_loss * self.other_batch) / self.total_batch
+
+        return total_loss
