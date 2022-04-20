@@ -70,7 +70,7 @@ def parse_args():
     parser.add_argument('--super_batch', 
     help='Super batch for this node (bigger than the parser batch', 
     type=int, 
-    default=10)
+    default=1)
 
     parser.add_argument('--mini_batch', 
     help='Mini-batch to report loss', 
@@ -195,7 +195,7 @@ def main():
 
     device = torch.device('cuda:0' if torch.cuda.is_available() and args.cuda else 'cpu')
 
-    super_batch = max(1, int(args.super_batch / args.batch_size))
+    super_batch = max(1, args.super_batch)
     mini_batch = max(1, int(args.mini_batch / super_batch))
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(args.epochs - start_epoch + super_batch - 1))
