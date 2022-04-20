@@ -67,6 +67,11 @@ def parse_args():
     type=int, 
     default=10)
 
+    parser.add_argument('--super_batch', 
+    help='Super batch for this node (bigger than the parser batch', 
+    type=int, 
+    default=10)
+
     parser.add_argument('--mini_batch', 
     help='Mini-batch to report loss', 
     type=int, 
@@ -139,13 +144,12 @@ def main():
                 and args.socket > 0 and args.buffer > 0)
         wireless_trainer = WirelessTrainer(args.inet_type, args.ip_address, 
                                         args.socket, args.buffer, args.epochs, 
-                                        args.batch_size, criterion)
+                                        args.batch_size)
 
         print("Total batch", wireless_trainer.total_batch) 
 
         trainset = wireless_trainer.get_data_subset(trainset, 
                                                     torch.utils.data.random_split)
-        criterion = wireless_trainer.criterion
 
     trainloader = torch.utils.data.DataLoader(trainset, 
                                               batch_size=args.batch_size, 
@@ -193,28 +197,41 @@ def main():
 
     device = torch.device('cuda:0' if torch.cuda.is_available() and args.cuda else 'cpu')
 
+    super_batch = max(1, int(args.super_batch / args.batch_size))
+    mini_batch = max(1, int(args.mini_batch / args.super_batch))
+
     net.to(device)
 
     for epoch in range(start_epoch, args.epochs):
         running_loss = 0.0
+        super_count = 0
         for i, data in enumerate(trainloader, 0):
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
 
-            # zero the parameter gradients
-            optimizer.zero_grad()
+            if super_count == super_batch:
+                # zero the parameter gradients
+                optimizer.zero_grad()
 
             # forward + backward + optimize
             outputs = net(inputs.to(device))
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
 
-            # print statistics
-            running_loss += loss.item()
-            if i % args.mini_batch == (args.mini_batch - 1):
-                print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / args.mini_batch:.3f}')
-                running_loss = 0.0
+            if super_count == super_batch:
+                loss = criterion(outputs, labels)
+                loss.backward()
+                if args.wireless:
+                    wireless_trainer.grad_averging(net)
+                optimizer.step()
+                super_count = 0
+
+                # print statistics
+                running_loss += loss.item()
+
+                if i % mini_batch == (mini_batch - 1):
+                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / mini_batch :.3f}')
+                    running_loss = 0.0
+
+            super_count += 1
 
         correct = 0
         total = 0
