@@ -193,18 +193,19 @@ def main():
         epochs.append(checkpoint['epoch'])
         accs.append(checkpoint['acc'])
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(args.epochs - start_epoch))
-
     device = torch.device('cuda:0' if torch.cuda.is_available() and args.cuda else 'cpu')
 
     super_batch = max(1, int(args.super_batch / args.batch_size))
-    mini_batch = max(1, int(args.mini_batch / args.super_batch))
+    mini_batch = max(1, int(args.mini_batch / super_batch))
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(args.epochs - start_epoch + super_batch - 1))
 
     net.to(device)
 
     for epoch in range(start_epoch, args.epochs):
         running_loss = 0.0
         super_count = 0
+        loss = 0
         for i, data in enumerate(trainloader, 0):
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
@@ -215,9 +216,9 @@ def main():
 
             # forward + backward + optimize
             outputs = net(inputs.to(device))
+            loss += criterion(outputs, labels)
 
             if super_count == super_batch:
-                loss = criterion(outputs, labels)
                 loss.backward()
                 if args.wireless:
                     wireless_trainer.grad_averging(net)
@@ -227,8 +228,10 @@ def main():
                 # print statistics
                 running_loss += loss.item()
 
+                loss = 0
+
                 if i % mini_batch == (mini_batch - 1):
-                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / mini_batch :.3f}')
+                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / args.mini_batch :.3f}')
                     running_loss = 0.0
 
             super_count += 1
