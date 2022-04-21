@@ -196,7 +196,6 @@ def main():
     device = torch.device('cuda:0' if torch.cuda.is_available() and args.cuda else 'cpu')
 
     super_batch = max(1, args.super_batch)
-    mini_batch = max(1, int(args.mini_batch / super_batch))
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=(args.epochs - start_epoch + super_batch - 1))
 
@@ -205,7 +204,7 @@ def main():
     for epoch in range(start_epoch, args.epochs):
         running_loss = 0.0
         super_count = 0
-        loss = 0
+        loss = 0.0
         for i, data in enumerate(trainloader, 0):
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
@@ -218,6 +217,9 @@ def main():
             outputs = net(inputs.to(device))
             loss += criterion(outputs, labels)
 
+            # print statistics
+            running_loss += loss.item()
+
             if super_count == super_batch:
                 loss.backward()
                 if args.wireless:
@@ -225,14 +227,11 @@ def main():
                 optimizer.step()
                 super_count = 0
 
-                # print statistics
-                running_loss += loss.item()
+                loss = 0.0
 
-                loss = 0
-
-                if i % mini_batch == (mini_batch - 1):
-                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / args.mini_batch :.3f}')
-                    running_loss = 0.0
+            if i % args.mini_batch == (args.mini_batch - 1):
+                print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / args.mini_batch :.3f}')
+                running_loss = 0.0
 
             super_count += 1
 
