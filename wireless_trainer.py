@@ -69,20 +69,25 @@ class WirelessTrainer:
         trainset, _ = splitter(trainset, [subset, len(trainset) - subset])
         return trainset
 
-    def recursive_grad_averaging(self, layer):
+    def recursive_grad_averaging(self, layer, buffer=[]):
         out = []
-        buffer = []
         for l in layer:
             if type(l) == list:
-                out.append(self.recursive_grad_averaging(l))
+                temp, buffer = self.recursive_grad_averaging(l, buffer)
+                out.append(temp)
             else:
                 temp = str(l) + ' '
-                other = self.send_and_recv(temp)
-                buffer.extend(other.split(' ')[:-1])
+                if not buffer:
+                    other = self.send_and_recv(temp)
+                    buffer.extend(other.split(' ')[:-1])
                 out.append((l * self.batch_size + float(buffer.pop(0)) * self.other_batch)
                             / self.total_batch)
-        return out
+        return out, buffer
 
     def grad_averging(self, model):
+        buffer = []
         for p in model.parameters():
-            p.grad = torch.tensor(self.recursive_grad_averaging(p.grad.tolist()))
+            print("Before load")
+            weights, buffer = self.recursive_grad_averaging(p.grad.tolist(), buffer)
+            p.grad = torch.tensor(weights)
+            print("Loaded parameter")
