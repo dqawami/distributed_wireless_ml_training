@@ -139,6 +139,10 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
 
+    net = get_model(args.model)
+
+    hook = None
+
     if args.wireless:
         assert (args.inet_type is not None and args.ip_address is not None
                 and args.socket > 0 and args.buffer > 0)
@@ -150,6 +154,7 @@ def main():
 
         trainset = wireless_trainer.get_data_subset(trainset, 
                                                     torch.utils.data.random_split)
+        hook = wireless_trainer.grad_averaging
 
     trainloader = torch.utils.data.DataLoader(trainset, 
                                               batch_size=args.batch_size, 
@@ -160,8 +165,6 @@ def main():
                                              batch_size=args.batch_size, 
                                              shuffle=False, 
                                              num_workers=args.test_workers)
-
-    net = get_model(args.model)
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum)
 
@@ -203,27 +206,24 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         running_loss = 0.0
-        super_count = 0
+        super_count = 1
         loss = 0.0
         for i, data in enumerate(trainloader, 0):
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
 
-            if super_count == super_batch:
-                # zero the parameter gradients
-                optimizer.zero_grad()
-
             # forward + backward + optimize
-            outputs = net(inputs.to(device))
+            outputs = net(inputs.to(device), hook)
             loss += criterion(outputs, labels)
 
             # print statistics
-            running_loss += loss.item()
+            running_loss += loss.item() / super_count
 
             if super_count == super_batch:
+                optimizer.zero_grad()
                 loss.backward()
-                if args.wireless:
-                    wireless_trainer.grad_averging(net)
+                '''if args.wireless:
+                    wireless_trainer.grad_averging(net)'''
                 optimizer.step()
                 super_count = 0
 
