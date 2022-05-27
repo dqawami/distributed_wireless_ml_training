@@ -82,6 +82,11 @@ def parse_args():
     type=int, 
     default=200)
 
+    parser.add_argument('--data_split', 
+    help='Specifies subset of data',
+    type=int,
+    default=1)
+
     parser.add_argument('--wireless', 
     help='Whether or not training is wireless', 
     action='store_true')
@@ -133,6 +138,9 @@ def main():
                                             download=args.save_data, 
                                             transform=transform)
 
+    subset = len(trainset) // args.data_split
+    trainset, _ = torch.utils.data.random_split(trainset, [subset, len(trainset) - subset])
+
     testset = torchvision.datasets.CIFAR10(root=args.data_dir, train=False, 
                                            download=args.save_data, 
                                            transform=transform)
@@ -140,8 +148,6 @@ def main():
     criterion = nn.CrossEntropyLoss()
 
     net = get_model(args.model)
-
-    hook = None
 
     if args.wireless:
         assert (args.inet_type is not None and args.ip_address is not None
@@ -154,7 +160,6 @@ def main():
 
         trainset = wireless_trainer.get_data_subset(trainset, 
                                                     torch.utils.data.random_split)
-        hook = wireless_trainer.grad_averaging
 
     trainloader = torch.utils.data.DataLoader(trainset, 
                                               batch_size=args.batch_size, 
@@ -212,18 +217,21 @@ def main():
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
 
+            if super_count == super_batch:
+                optimizer.zero_grad()
+
             # forward + backward + optimize
-            outputs = net(inputs.to(device), hook)
+            outputs = net(inputs.to(device))
+            # print("Forwarded")
             loss += criterion(outputs, labels)
 
             # print statistics
             running_loss += loss.item() / super_count
 
             if super_count == super_batch:
-                optimizer.zero_grad()
                 loss.backward()
-                '''if args.wireless:
-                    wireless_trainer.grad_averging(net)'''
+                if args.wireless:
+                    wireless_trainer.grad_averaging(net)
                 optimizer.step()
                 super_count = 0
 

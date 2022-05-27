@@ -54,14 +54,13 @@ class WirelessTrainer:
         for g in grad:
             if type(g) != list:
                 other = self.send_and_recv(g)
-                out.append((g * self.batch_size + other * self.other_batch) / self.total_batch)
+                out.append(type(g)((g * self.batch_size + other * self.other_batch) / self.total_batch))
             else:
                 out.append(self.recursive_grad_averaging(g))
 
         return out
 
-    def grad_averaging(self, grad):
-        grad_list = grad.tolist()
-        new_grad = self.recursive_grad_averaging(grad_list)
-        print("Model loaded")
-        return torch.tensor(new_grad)
+    def grad_averaging(self, model):
+        for param in model.parameters():
+            param.grad.data = torch.tensor(self.recursive_grad_averaging(
+                param.grad.data.tolist()))
